@@ -1,0 +1,7 @@
+JARVIS
+
+GITHUB REPO URL
+https://github.com/aizelmartin/JARVIS.git
+
+vs code location
+C:\Users\aizel\AppData\Local\Programs\Microsoft VS Code
