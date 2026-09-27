@@ -37,7 +37,7 @@ from src.hand_tracking.hand_detector import HandDetector
 OUTPUT_CSV = os.path.join(PROJECT_ROOT, "data", "processed", "landmarks_custom.csv")
 
 # ── Configure your custom signs here ─────────────────────────────────── #
-CUSTOM_SIGNS     = ["hello", "thankyou", "help", "yes", "no"]
+DEFAULT_SIGNS    = ["hello", "thankyou", "help", "yes", "no"]
 SAMPLES_PER_SIGN = 200          # samples to collect per sign
 AUTO_RECORD_FPS  = 10           # auto-capture rate when recording (frames/sec)
 
@@ -54,7 +54,8 @@ def overlay_bar(frame, filled: int, total: int, y: int = 110):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200, 200, 200), 1, cv2.LINE_AA)
 
 
-def run_collector():
+def run_collector(custom_signs=None, samples_per_sign=SAMPLES_PER_SIGN):
+    signs_to_use = custom_signs if custom_signs else DEFAULT_SIGNS
     cam      = CameraStream(camera_index=0, width=640, height=480)
     detector = HandDetector(max_hands=2, min_detection_conf=0.6)
 
@@ -77,12 +78,12 @@ def run_collector():
     last_capture = 0.0
     capture_interval = 1.0 / AUTO_RECORD_FPS
 
-    print(f"[Collector] Signs to collect: {CUSTOM_SIGNS}")
-    print(f"[Collector] {SAMPLES_PER_SIGN} samples per sign")
+    print(f"[Collector] Signs to collect: {signs_to_use}")
+    print(f"[Collector] {samples_per_sign} samples per sign")
     print()
 
-    while sign_idx < len(CUSTOM_SIGNS):
-        current_sign = CUSTOM_SIGNS[sign_idx]
+    while sign_idx < len(signs_to_use):
+        current_sign = signs_to_use[sign_idx]
 
         # Count how many we already have for this sign
         existing_for_sign = sum(1 for r in rows if r[-1] == current_sign)
@@ -103,18 +104,18 @@ def run_collector():
         # ── Auto-capture when recording ───────────────────────────── #
         now = time.time()
         if recording and n_hands > 0 and (now - last_capture) >= capture_interval:
-            if sign_count < SAMPLES_PER_SIGN:
+            if sign_count < samples_per_sign:
                 rows.append(list(features_126) + [current_sign])
                 sign_count += 1
                 last_capture = now
 
-            if sign_count >= SAMPLES_PER_SIGN:
+            if sign_count >= samples_per_sign:
                 recording = False
                 print(f"[Collector] ✅ '{current_sign}' complete — {sign_count} samples")
                 # Auto-advance to next sign after a brief pause
                 time.sleep(1.0)
                 sign_idx += 1
-                if sign_idx >= len(CUSTOM_SIGNS):
+                if sign_idx >= len(signs_to_use):
                     break
                 continue
 
@@ -126,7 +127,7 @@ def run_collector():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 200, 0), 2, cv2.LINE_AA)
 
         # Progress bar
-        overlay_bar(frame, sign_count, SAMPLES_PER_SIGN)
+        overlay_bar(frame, sign_count, samples_per_sign)
 
         # Hand status
         hand_txt   = f"{n_hands} hand(s): {hands_lbl}" if n_hands > 0 else "No hands detected"
@@ -151,12 +152,12 @@ def run_collector():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1, cv2.LINE_AA)
 
         # Sign progress list on the right
-        for i, s in enumerate(CUSTOM_SIGNS):
+        for i, s in enumerate(signs_to_use):
             cnt   = sum(1 for r in rows if r[-1] == s)
-            done  = cnt >= SAMPLES_PER_SIGN
+            done  = cnt >= samples_per_sign
             color = (0, 220, 80) if done else ((255, 200, 0) if i == sign_idx else (100, 100, 100))
             mark  = "✓" if done else ("►" if i == sign_idx else " ")
-            cv2.putText(frame, f"{mark} {s} ({cnt}/{SAMPLES_PER_SIGN})",
+            cv2.putText(frame, f"{mark} {s} ({cnt}/{samples_per_sign})",
                         (frame.shape[1] - 220, 45 + i * 28),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 1, cv2.LINE_AA)
 
@@ -194,4 +195,12 @@ def run_collector():
 
 
 if __name__ == "__main__":
-    run_collector()
+    import argparse
+    parser = argparse.ArgumentParser(description="JARVIS Custom Sign Data Collector")
+    parser.add_argument("--signs", nargs="+", default=None,
+                        help="List of signs to collect (e.g. --signs please sorry welcome)")
+    parser.add_argument("--samples", type=int, default=SAMPLES_PER_SIGN,
+                        help="Number of samples to collect per sign (default: 200)")
+    args = parser.parse_args()
+
+    run_collector(custom_signs=args.signs, samples_per_sign=args.samples)
