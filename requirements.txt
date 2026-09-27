@@ -22,3 +22,12 @@ seaborn>=0.13.0
 
 # Text-to-Speech
 pyttsx3>=2.90
+
+# Web Framework
+Flask>=3.0.0
+Flask-SocketIO>=5.3.0
+eventlet>=0.33.3
+
+# Translation
+googletrans==4.0.0-rc1
+

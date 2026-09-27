@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JARVIS - Universal Sign Language Translator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- SocketIO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body>
+    <header>
+        <h1>JARVIS</h1>
+        <p class="subtitle">Universal Sign Language Translator</p>
+        <p class="sub-subtitle">AI-powered real-time sign language recognition and translation</p>
+    </header>
+
+    <main class="container">
+        <!-- LEFT: Camera Section -->
+        <section class="card col-left">
+            <h2>Live Camera</h2>
+            
+            <div class="video-container">
+                <!-- Hidden video element: source of webcam stream -->
+                <video id="video-input" autoplay playsinline muted style="display:none;"></video>
+                <!-- Hidden canvas: used only for JPEG capture to send to backend -->
+                <canvas id="canvas-hidden" width="640" height="480" style="display:none;"></canvas>
+                <!-- Main visible canvas: local video + landmark overlay drawn here -->
+                <canvas id="canvas-main" width="640" height="480"></canvas>
+                <div id="camera-status" class="status-indicator">Camera Offline</div>
+            </div>
+
+            <div class="controls">
+                <button id="btn-start" class="btn primary">Start Camera</button>
+                <button id="btn-stop" class="btn danger" disabled>Stop Camera</button>
+            </div>
+            
+            <div class="server-status">
+                Backend Connection: <span id="socket-status">Connecting...</span>
+            </div>
+        </section>
+
+        <!-- CENTER: Sign Recognition Section -->
+        <section class="card col-center">
+            <h2>Sign Recognition</h2>
+            
+            <div class="recognition-box">
+                <div class="label">Current Sign</div>
+                <div id="current-sign" class="value highlight">...</div>
+                
+                <div class="confidence-bar-container">
+                    <span>Confidence: <span id="conf-val">0</span>%</span>
+                    <div class="bar-bg">
+                        <div id="conf-bar" class="bar-fill"></div>
+                    </div>
+                </div>
+                
+                <div class="hold-bar-container">
+                    <span>Hold to Confirm:</span>
+                    <div class="bar-bg">
+                        <div id="hold-bar" class="bar-fill hold-fill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sentence-box">
+                <div class="label">Constructed Sentence</div>
+                <div id="sentence-display" class="sentence">...</div>
+                
+                <div class="controls small-controls">
+                    <button id="btn-delete" class="btn secondary">Delete Word</button>
+                    <button id="btn-clear" class="btn danger">Clear All</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT: Translation & Speech Section -->
+        <section class="card col-right">
+            <h2>Translation & Speech</h2>
+            
+            <div class="translation-box">
+                <div class="label">Translate to:</div>
+                <select id="lang-select" class="dropdown">
+                    <option value="en">English</option>
+                    <option value="ml">Malayalam</option>
+                    <option value="hi">Hindi</option>
+                    <option value="ta">Tamil</option>
+                    <option value="kn">Kannada</option>
+                    <option value="te">Telugu</option>
+                </select>
+
+                <div class="label mt-10">Translated Text:</div>
+                <div id="translated-display" class="sentence translated">...</div>
+                
+                <button id="btn-speak" class="btn primary full-width mt-10">🔊 Speak Translation</button>
+            </div>
+
+            <hr>
+
+            <div class="stt-box">
+                <h2>Hearing Person Reply</h2>
+                <p class="desc">Listen to speech and convert it to text</p>
+                <button id="btn-mic" class="btn secondary full-width">🎤 Speech Input</button>
+                <div id="stt-status" class="stt-status">Ready</div>
+                <div class="label mt-10">Recognized Speech:</div>
+                <div id="stt-display" class="sentence">...</div>
+            </div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

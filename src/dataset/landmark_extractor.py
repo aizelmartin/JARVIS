@@ -123,7 +123,7 @@ def extract_dataset(
         sys.exit(1)
 
     print(f"[Extractor] Found {len(class_folders)} classes: {class_folders}")
-    print(f"[Extractor] Output → {output_csv}")
+    print(f"[Extractor] Output -> {output_csv}")
     if max_per_class:
         print(f"[Extractor] Limiting to {max_per_class} images per class")
     print()
@@ -165,14 +165,14 @@ def extract_dataset(
         pct     = (cls_idx + 1) / len(class_folders) * 100
         print(
             f"  [{cls_idx+1:2d}/{len(class_folders)}] {cls_name:8s} "
-            f"✓ {found:5d}  ✗ {skipped:4d}  |  "
+            f"OK {found:5d}  SKIP {skipped:4d}  |  "
             f"total so far: {total_found:6d}  |  "
             f"{pct:5.1f}%  {elapsed:.0f}s elapsed"
         )
 
     print()
-    print(f"[Extractor] Done — {total_found} samples extracted, {total_skipped} skipped.")
-    print(f"[Extractor] Saving → {output_csv}")
+    print(f"[Extractor] Done - {total_found} samples extracted, {total_skipped} skipped.")
+    print(f"[Extractor] Saving -> {output_csv}")
 
     df = pd.DataFrame(rows, columns=col_names)
 

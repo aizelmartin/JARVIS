@@ -55,81 +55,83 @@ def draw_hud(
     stt_text: str,
     is_listening: bool,
 ):
-    """Renders a sleek, comprehensive two-way communication HUD."""
+    """Renders a sleek, comprehensive two-way communication HUD with Glassmorphism."""
     h, w = frame.shape[:2]
+    overlay = frame.copy()
 
     # ── Top Bar: Telemetry & Status ──────────────────────────────────── #
-    cv2.rectangle(frame, (0, 0), (w, 38), (18, 18, 18), -1)
-    cv2.line(frame, (0, 38), (w, 38), (60, 60, 60), 1)
-
-    cv2.putText(frame, "JARVIS", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.70, (0, 230, 130), 2, cv2.LINE_AA)
-    cv2.putText(frame, f"| FPS: {fps:.1f}", (105, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"| ML: {model_name}", (195, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 200, 240), 1, cv2.LINE_AA)
-
-    # Hand Mode
-    mode_text = f"{n_hands} HAND(S)" if n_hands > 0 else "IDLE"
-    mode_color = (0, 220, 120) if n_hands == 2 else ((255, 180, 0) if n_hands == 1 else (110, 110, 110))
-    cv2.putText(frame, mode_text, (w - 120, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.50, mode_color, 2, cv2.LINE_AA)
-
+    cv2.rectangle(overlay, (0, 0), (w, 38), (10, 10, 15), -1)
+    
     # ── Middle-Top: Speech-to-Text (Hearing Person Response) ─────────── #
-    stt_banner_h = 32
+    stt_banner_h = 34
     stt_y = 42
-    stt_bg = (35, 25, 10) if is_listening else (25, 25, 25)
-    cv2.rectangle(frame, (0, stt_y), (w, stt_y + stt_banner_h), stt_bg, -1)
-    cv2.line(frame, (0, stt_y + stt_banner_h), (w, stt_y + stt_banner_h), (50, 50, 50), 1)
-
-    mic_icon = "MIC: [RECORDING...]" if is_listening else "MIC: [IDLE - Press M]"
-    mic_color = (0, 140, 255) if is_listening else (140, 140, 140)
-    cv2.putText(frame, mic_icon, (12, stt_y + 21), cv2.FONT_HERSHEY_SIMPLEX, 0.42, mic_color, 1, cv2.LINE_AA)
-
-    display_stt = f"Heard: \"{stt_text}\"" if stt_text else stt_status
-    stt_text_color = (0, 240, 255) if stt_text else (160, 160, 160)
-    cv2.putText(frame, display_stt, (180, stt_y + 21), cv2.FONT_HERSHEY_SIMPLEX, 0.45, stt_text_color, 1, cv2.LINE_AA)
+    stt_bg = (60, 20, 30) if is_listening else (20, 20, 25)
+    cv2.rectangle(overlay, (0, stt_y), (w, stt_y + stt_banner_h), stt_bg, -1)
 
     # ── Bottom Section: Sign Translation & Sentence Construction ─────── #
     card_h = 135
-    cv2.rectangle(frame, (0, h - card_h), (w, h), (16, 16, 16), -1)
-    cv2.line(frame, (0, h - card_h), (w, h - card_h), (60, 60, 60), 1)
+    cv2.rectangle(overlay, (0, h - card_h), (w, h), (15, 15, 20), -1)
 
-    # Row 1: Live Sign & Confidence
+    # Blend overlay with original frame (Alpha = 0.85 for glass effect)
+    cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+
+    # ── Draw Text on original frame (so text stays sharp) ────────────── #
+    # Top Bar Borders & Text
+    cv2.line(frame, (0, 38), (w, 38), (100, 100, 100), 1)
+    cv2.putText(frame, "JARVIS", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.70, (0, 255, 150), 2, cv2.LINE_AA)
+    cv2.putText(frame, f"| FPS: {fps:.1f}", (105, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"| ML: {model_name}", (195, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 220, 255), 1, cv2.LINE_AA)
+
+    mode_text = f"{n_hands} HAND(S)" if n_hands > 0 else "IDLE"
+    mode_color = (0, 255, 120) if n_hands == 2 else ((0, 200, 255) if n_hands == 1 else (150, 150, 150))
+    cv2.putText(frame, mode_text, (w - 120, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.50, mode_color, 2, cv2.LINE_AA)
+
+    # STT Text
+    cv2.line(frame, (0, stt_y + stt_banner_h), (w, stt_y + stt_banner_h), (80, 80, 80), 1)
+    mic_icon = "MIC: [RECORDING...]" if is_listening else "MIC: [IDLE - Press M]"
+    mic_color = (0, 140, 255) if is_listening else (140, 140, 140)
+    cv2.putText(frame, mic_icon, (12, stt_y + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.45, mic_color, 1, cv2.LINE_AA)
+
+    display_stt = f"Heard: \"{stt_text}\"" if stt_text else stt_status
+    stt_text_color = (0, 255, 255) if stt_text else (180, 180, 180)
+    cv2.putText(frame, display_stt, (190, stt_y + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.48, stt_text_color, 1, cv2.LINE_AA)
+
+    # Bottom Section Text
+    cv2.line(frame, (0, h - card_h), (w, h - card_h), (80, 80, 80), 1)
     has_sign = (sign != "..." and conf >= 0.60)
     display_sign = sign.upper() if has_sign else "..."
-    sign_color = (0, 240, 140) if has_sign else (110, 110, 110)
+    sign_color = (0, 255, 150) if has_sign else (150, 150, 150)
 
-    cv2.putText(frame, "SIGN:", (14, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (160, 160, 160), 1, cv2.LINE_AA)
-    cv2.putText(frame, display_sign, (65, h - 103), cv2.FONT_HERSHEY_SIMPLEX, 0.85, sign_color, 2, cv2.LINE_AA)
+    cv2.putText(frame, "SIGN:", (14, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+    cv2.putText(frame, display_sign, (70, h - 102), cv2.FONT_HERSHEY_SIMPLEX, 0.90, sign_color, 2, cv2.LINE_AA)
 
-    # Confidence & Hold Bar
     if has_sign:
-        bar_x, bar_y = 230, h - 116
-        bar_w = int(110 * conf)
-        cv2.putText(frame, f"CONF: {conf*100:.0f}%", (bar_x, bar_y + 11), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
-        cv2.rectangle(frame, (bar_x + 75, bar_y), (bar_x + 185, bar_y + 12), (45, 45, 45), -1)
-        cv2.rectangle(frame, (bar_x + 75, bar_y), (bar_x + 75 + bar_w, bar_y + 12), (0, 210, 120), -1)
+        bar_x, bar_y = 250, h - 116
+        bar_w = int(120 * conf)
+        cv2.putText(frame, f"CONF: {conf*100:.0f}%", (bar_x, bar_y + 11), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.rectangle(frame, (bar_x + 85, bar_y), (bar_x + 205, bar_y + 12), (60, 60, 60), -1)
+        cv2.rectangle(frame, (bar_x + 85, bar_y), (bar_x + 85 + bar_w, bar_y + 12), (0, 255, 150), -1)
 
-        # Hold stability progress
-        hold_w = int(110 * hold_ratio)
-        hold_color = (0, 220, 255) if hold_ratio < 1.0 else (0, 255, 100)
-        cv2.putText(frame, "HOLD:", (bar_x, bar_y + 27), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
-        cv2.rectangle(frame, (bar_x + 75, bar_y + 16), (bar_x + 185, bar_y + 28), (45, 45, 45), -1)
-        cv2.rectangle(frame, (bar_x + 75, bar_y + 16), (bar_x + 75 + hold_w, bar_y + 28), hold_color, -1)
+        hold_w = int(120 * hold_ratio)
+        hold_color = (0, 200, 255) if hold_ratio < 1.0 else (0, 255, 150)
+        cv2.putText(frame, "HOLD:", (bar_x, bar_y + 27), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.rectangle(frame, (bar_x + 85, bar_y + 16), (bar_x + 205, bar_y + 28), (60, 60, 60), -1)
+        cv2.rectangle(frame, (bar_x + 85, bar_y + 16), (bar_x + 85 + hold_w, bar_y + 28), hold_color, -1)
 
-    # Voice status badge
     tts_text = "VOICE: [ON]" if tts_enabled else "VOICE: [OFF]"
-    tts_color = (0, 220, 120) if tts_enabled else (120, 120, 120)
-    cv2.putText(frame, tts_text, (w - 125, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.48, tts_color, 1, cv2.LINE_AA)
+    tts_color = (0, 255, 150) if tts_enabled else (150, 150, 150)
+    cv2.putText(frame, tts_text, (w - 130, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.48, tts_color, 1, cv2.LINE_AA)
 
-    # Row 2: Sentence Bar
-    cv2.line(frame, (10, h - 78), (w - 10, h - 78), (45, 45, 45), 1)
-    cv2.putText(frame, "SENTENCE:", (14, h - 52), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 200, 255), 1, cv2.LINE_AA)
-
+    # Sentence Box
+    cv2.line(frame, (10, h - 78), (w - 10, h - 78), (80, 80, 80), 1)
+    cv2.putText(frame, "SENTENCE:", (14, h - 52), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1, cv2.LINE_AA)
     sent_display = sentence if sentence != "..." else "Add words by signing..."
-    sent_color = (255, 255, 255) if sentence != "..." else (110, 110, 110)
-    cv2.putText(frame, sent_display, (100, h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, sent_color, 2, cv2.LINE_AA)
+    sent_color = (255, 255, 255) if sentence != "..." else (150, 150, 150)
+    cv2.putText(frame, sent_display, (110, h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, sent_color, 2, cv2.LINE_AA)
 
-    # Row 3: Command Controls Footer
-    footer = "ENTER=Speak Sentence   BACKSPACE=Delete Word   C=Clear   M=Mic STT   T=Voice   Q=Quit"
-    cv2.putText(frame, footer, (14, h - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (150, 150, 150), 1, cv2.LINE_AA)
+    # Footer
+    footer = "ENTER=Speak Sentence   BACK=Delete Word   C=Clear   M=Mic STT   T=Voice   Q=Quit"
+    cv2.putText(frame, footer, (14, h - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (180, 180, 180), 1, cv2.LINE_AA)
 
 
 def main():
@@ -150,7 +152,7 @@ def main():
     classifier = SignClassifier(MODEL_PATH, smooth_window=5, confidence_threshold=0.65)
     speech = SpeechEngine(rate=2, volume=100)
     listener = SpeechListener()
-    sentence_builder = SentenceBuilder(max_words=12)
+    sentence_builder = SentenceBuilder(max_words=100)
 
     tts_enabled = True
     REQUIRED_STABLE_FRAMES = 9
@@ -236,9 +238,9 @@ def main():
             state = "ON" if tts_enabled else "OFF"
             print(f"[JARVIS] Voice Speech: {state}")
         elif key in (ord("m"), ord("M")):
-            # Start Speech-to-Text microphone recording (3.5s)
+            # Start Speech-to-Text microphone recording (5.0s)
             print("[JARVIS] Listening to microphone...")
-            listener.listen_async(duration_sec=3.5)
+            listener.listen_async(duration_sec=5.0)
         elif key == 13:  # ENTER key -> Speak entire sentence
             sent = sentence_builder.get_sentence()
             if sent != "...":
