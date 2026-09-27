@@ -1,13 +1,24 @@
-# Computer Vision & Landmark Extraction
-opencv-python>=4.9.0
-mediapipe>=0.10.14
+# ──────────────────────────────────────────────────────────────────────────
+# JARVIS – Universal Sign Language Translator
+# requirements.txt
+#
+# IMPORTANT VERSION NOTES:
+#   mediapipe 0.10.x  → requires numpy<2  AND installs opencv-contrib-python
+#   We do NOT install opencv-python separately — cv2 comes from
+#   opencv-contrib-python (a superset) that mediapipe pulls in automatically.
+# ──────────────────────────────────────────────────────────────────────────
 
-# Machine Learning & Data Processing
-numpy>=1.26.0
-pandas>=2.2.0
+# Hand landmark detection  (installs opencv-contrib-python as its dependency)
+mediapipe>=0.10.14,<1.0.0
+
+# Numeric computing  (must stay <2 for mediapipe 0.10.x compatibility)
+numpy>=1.24.0,<2.0.0
+
+# Data processing & visualization
+pandas>=2.0.0
 scikit-learn>=1.4.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
 
-# Speech Output (Text-to-Speech)
+# Text-to-Speech
 pyttsx3>=2.90
