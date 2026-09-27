@@ -1,0 +1,30 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Large Datasets & Media (Keep large raw downloads out of Git)
+data/raw/*
+!data/raw/.gitkeep
+
+# IDE & Editor settings
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

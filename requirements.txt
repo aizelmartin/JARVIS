@@ -1,0 +1,13 @@
+# Computer Vision & Landmark Extraction
+opencv-python>=4.9.0
+mediapipe>=0.10.14
+
+# Machine Learning & Data Processing
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.4.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Speech Output (Text-to-Speech)
+pyttsx3>=2.90
