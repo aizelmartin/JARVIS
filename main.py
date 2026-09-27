@@ -1,16 +1,26 @@
 """
 main.py — JARVIS Universal Sign Language Translator
 ===================================================
-Real-time webcam pipeline:
-  1. Camera Stream: 640x480 high-FPS video feed
-  2. Hand Tracking: Dual-hand MediaPipe tracking & landmark normalization (126 features)
-  3. ML Classifier: Real-time inference with temporal smoothing majority voting
-  4. Real-Time Speech: Hold-to-Speak (Dwell Time) gesture stabilization with zero audio lag
+Complete Two-Way Communication System:
+  1. Sign Language -> Speech:
+     - 640x480 video feed with dual-hand MediaPipe tracking
+     - 126-feature normalized landmark vector
+     - Real-time ML classifier with confidence thresholding
+     - Hold-to-Confirm dwell stabilization (0.3s)
+     - Sentence Builder: Accumulates signs into full phrases
+     - Native Windows SAPI asynchronous Text-to-Speech (TTS)
+  2. Speech -> Text:
+     - Microphone listening via sounddevice + SpeechRecognition
+     - Displays hearing person's spoken words on screen for deaf/mute user
 
-Controls:
-  Q — Quit
-  T — Toggle Speech (TTS) ON / OFF
-  S — Force speak current sign immediately
+Keyboard Controls:
+  Q         — Quit
+  T         — Toggle Voice (TTS) ON / OFF
+  ENTER     — Speak the entire constructed sentence aloud
+  BACKSPACE — Delete the last added word from sentence
+  C         — Clear the constructed sentence
+  M         — Listen to microphone (Speech-to-Text for 3.5s)
+  S         — Force speak current sign immediately
 """
 
 import cv2
@@ -23,7 +33,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 from src.camera.camera_stream import CameraStream
 from src.hand_tracking.hand_detector import HandDetector
 from src.ml.classifier import SignClassifier
+from src.ml.sentence_builder import SentenceBuilder
 from src.speech.speech_engine import SpeechEngine
+from src.speech.speech_listener import SpeechListener
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "saved_models", "sign_classifier.pkl")
 
@@ -37,76 +49,91 @@ def draw_hud(
     fps: float,
     tts_enabled: bool,
     model_name: str,
-    hold_ratio: float = 0.0,
-    just_spoken: bool = False,
+    hold_ratio: float,
+    sentence: str,
+    stt_status: str,
+    stt_text: str,
+    is_listening: bool,
 ):
-    """Renders an intuitive, responsive HUD over the camera frame."""
+    """Renders a sleek, comprehensive two-way communication HUD."""
     h, w = frame.shape[:2]
 
-    # Top status banner
-    cv2.rectangle(frame, (0, 0), (w, 42), (20, 20, 20), -1)
-    cv2.line(frame, (0, 42), (w, 42), (70, 70, 70), 1)
+    # ── Top Bar: Telemetry & Status ──────────────────────────────────── #
+    cv2.rectangle(frame, (0, 0), (w, 38), (18, 18, 18), -1)
+    cv2.line(frame, (0, 38), (w, 38), (60, 60, 60), 1)
 
-    # Title & FPS
-    cv2.putText(frame, "JARVIS", (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 220, 120), 2, cv2.LINE_AA)
-    cv2.putText(frame, f"|  FPS: {fps:.1f}", (110, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (200, 200, 200), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"|  Model: {model_name}", (210, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (160, 200, 240), 1, cv2.LINE_AA)
+    cv2.putText(frame, "JARVIS", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.70, (0, 230, 130), 2, cv2.LINE_AA)
+    cv2.putText(frame, f"| FPS: {fps:.1f}", (105, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"| ML: {model_name}", (195, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 200, 240), 1, cv2.LINE_AA)
 
-    # Hand mode badge (Top Right)
+    # Hand Mode
     mode_text = f"{n_hands} HAND(S)" if n_hands > 0 else "IDLE"
-    mode_color = (0, 220, 120) if n_hands == 2 else ((255, 180, 0) if n_hands == 1 else (100, 100, 100))
-    cv2.putText(frame, mode_text, (w - 130, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.55, mode_color, 2, cv2.LINE_AA)
+    mode_color = (0, 220, 120) if n_hands == 2 else ((255, 180, 0) if n_hands == 1 else (110, 110, 110))
+    cv2.putText(frame, mode_text, (w - 120, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.50, mode_color, 2, cv2.LINE_AA)
 
-    # Bottom Prediction Card
-    card_h = 105
-    cv2.rectangle(frame, (0, h - card_h), (w, h), (18, 18, 18), -1)
+    # ── Middle-Top: Speech-to-Text (Hearing Person Response) ─────────── #
+    stt_banner_h = 32
+    stt_y = 42
+    stt_bg = (35, 25, 10) if is_listening else (25, 25, 25)
+    cv2.rectangle(frame, (0, stt_y), (w, stt_y + stt_banner_h), stt_bg, -1)
+    cv2.line(frame, (0, stt_y + stt_banner_h), (w, stt_y + stt_banner_h), (50, 50, 50), 1)
+
+    mic_icon = "MIC: [RECORDING...]" if is_listening else "MIC: [IDLE - Press M]"
+    mic_color = (0, 140, 255) if is_listening else (140, 140, 140)
+    cv2.putText(frame, mic_icon, (12, stt_y + 21), cv2.FONT_HERSHEY_SIMPLEX, 0.42, mic_color, 1, cv2.LINE_AA)
+
+    display_stt = f"Heard: \"{stt_text}\"" if stt_text else stt_status
+    stt_text_color = (0, 240, 255) if stt_text else (160, 160, 160)
+    cv2.putText(frame, display_stt, (180, stt_y + 21), cv2.FONT_HERSHEY_SIMPLEX, 0.45, stt_text_color, 1, cv2.LINE_AA)
+
+    # ── Bottom Section: Sign Translation & Sentence Construction ─────── #
+    card_h = 135
+    cv2.rectangle(frame, (0, h - card_h), (w, h), (16, 16, 16), -1)
     cv2.line(frame, (0, h - card_h), (w, h - card_h), (60, 60, 60), 1)
 
-    # Sign label display
+    # Row 1: Live Sign & Confidence
     has_sign = (sign != "..." and conf >= 0.60)
     display_sign = sign.upper() if has_sign else "..."
-    sign_color = (0, 240, 140) if has_sign else (120, 120, 120)
+    sign_color = (0, 240, 140) if has_sign else (110, 110, 110)
 
-    cv2.putText(frame, "PREDICTED SIGN:", (14, h - 74), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1, cv2.LINE_AA)
-    cv2.putText(frame, display_sign, (14, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 1.25, sign_color, 3, cv2.LINE_AA)
+    cv2.putText(frame, "SIGN:", (14, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (160, 160, 160), 1, cv2.LINE_AA)
+    cv2.putText(frame, display_sign, (65, h - 103), cv2.FONT_HERSHEY_SIMPLEX, 0.85, sign_color, 2, cv2.LINE_AA)
 
-    # Speech Spoken Indicator
-    if just_spoken:
-        cv2.rectangle(frame, (14, h - 22), (160, h - 5), (0, 180, 90), -1)
-        cv2.putText(frame, "🔊 SPOKEN ALOUD", (20, h - 9), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
-
-    # Hold / Speak Dwell Meter
+    # Confidence & Hold Bar
     if has_sign:
-        # Confidence meter
-        bar_x, bar_y = 280, h - 68
-        bar_w, bar_max = int(160 * conf), 160
-        cv2.putText(frame, f"CONFIDENCE: {conf*100:.1f}%", (bar_x, bar_y - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 180), 1, cv2.LINE_AA)
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_max, bar_y + 10), (45, 45, 45), -1)
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + 10), (0, 210, 120), -1)
+        bar_x, bar_y = 230, h - 116
+        bar_w = int(110 * conf)
+        cv2.putText(frame, f"CONF: {conf*100:.0f}%", (bar_x, bar_y + 11), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
+        cv2.rectangle(frame, (bar_x + 75, bar_y), (bar_x + 185, bar_y + 12), (45, 45, 45), -1)
+        cv2.rectangle(frame, (bar_x + 75, bar_y), (bar_x + 75 + bar_w, bar_y + 12), (0, 210, 120), -1)
 
-        # Hold stability meter (fills to trigger speech)
-        hold_y = h - 28
-        hold_w = int(160 * hold_ratio)
-        meter_label = "HOLD STEADY TO SPEAK:" if hold_ratio < 1.0 else "CONFIRMED & SPOKEN:"
-        meter_color = (0, 200, 255) if hold_ratio < 1.0 else (0, 240, 100)
-        cv2.putText(frame, meter_label, (bar_x, hold_y - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (180, 180, 180), 1, cv2.LINE_AA)
-        cv2.rectangle(frame, (bar_x, hold_y), (bar_x + bar_max, hold_y + 10), (45, 45, 45), -1)
-        cv2.rectangle(frame, (bar_x, hold_y), (bar_x + hold_w, hold_y + 10), meter_color, -1)
+        # Hold stability progress
+        hold_w = int(110 * hold_ratio)
+        hold_color = (0, 220, 255) if hold_ratio < 1.0 else (0, 255, 100)
+        cv2.putText(frame, "HOLD:", (bar_x, bar_y + 27), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
+        cv2.rectangle(frame, (bar_x + 75, bar_y + 16), (bar_x + 185, bar_y + 28), (45, 45, 45), -1)
+        cv2.rectangle(frame, (bar_x + 75, bar_y + 16), (bar_x + 75 + hold_w, bar_y + 28), hold_color, -1)
 
-    # TTS Status badge (Bottom Right)
+    # Voice status badge
     tts_text = "VOICE: [ON]" if tts_enabled else "VOICE: [OFF]"
     tts_color = (0, 220, 120) if tts_enabled else (120, 120, 120)
-    cv2.putText(frame, tts_text, (w - 130, h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.55, tts_color, 2, cv2.LINE_AA)
+    cv2.putText(frame, tts_text, (w - 125, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.48, tts_color, 1, cv2.LINE_AA)
 
-    # Instructions footer
-    footer = "Q=Quit   T=Toggle Voice   S=Speak Now"
-    cv2.putText(frame, footer, (w - 270, h - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (140, 140, 140), 1, cv2.LINE_AA)
+    # Row 2: Sentence Bar
+    cv2.line(frame, (10, h - 78), (w - 10, h - 78), (45, 45, 45), 1)
+    cv2.putText(frame, "SENTENCE:", (14, h - 52), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 200, 255), 1, cv2.LINE_AA)
+
+    sent_display = sentence if sentence != "..." else "Add words by signing..."
+    sent_color = (255, 255, 255) if sentence != "..." else (110, 110, 110)
+    cv2.putText(frame, sent_display, (100, h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, sent_color, 2, cv2.LINE_AA)
+
+    # Row 3: Command Controls Footer
+    footer = "ENTER=Speak Sentence   BACKSPACE=Delete Word   C=Clear   M=Mic STT   T=Voice   Q=Quit"
+    cv2.putText(frame, footer, (14, h - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (150, 150, 150), 1, cv2.LINE_AA)
 
 
 def main():
-    print("[JARVIS] Initializing camera and hand tracking...")
+    print("[JARVIS] Initializing camera, hand tracking, and speech...")
     cam = CameraStream(camera_index=0, width=640, height=480)
     detector = HandDetector(max_hands=2, min_detection_conf=0.7)
 
@@ -120,22 +147,20 @@ def main():
         cam.release()
         sys.exit(1)
 
-    # Classifier with small temporal window for quick reaction
     classifier = SignClassifier(MODEL_PATH, smooth_window=5, confidence_threshold=0.65)
     speech = SpeechEngine(rate=2, volume=100)
-    tts_enabled = True
+    listener = SpeechListener()
+    sentence_builder = SentenceBuilder(max_words=12)
 
-    # ── Real-Time Gesture Hold-to-Speak (Dwell) State ────────────────── #
-    # At ~30 FPS, 9 consecutive frames = ~0.30 seconds hold to confirm
+    tts_enabled = True
     REQUIRED_STABLE_FRAMES = 9
     current_candidate = None
     hold_count = 0
     last_spoken_sign = None
     spoken_flash_timer = 0.0
 
-    print("[JARVIS] Real-time translator initialized.")
-    print("         Hold a gesture steady for 0.3s to speak it.")
-    print("         Keys: Q=Quit, T=Toggle Voice, S=Speak current sign.")
+    print("[JARVIS] Two-Way Translator is online!")
+    print("         Sign to form sentences. Press M to listen to speech.")
 
     while True:
         frame = cam.read_frame()
@@ -156,7 +181,6 @@ def main():
         if n_hands > 0:
             pred_sign, confidence = classifier.predict_smooth(features_126)
 
-            # Hold-to-Speak stabilization logic
             if pred_sign != "..." and confidence >= 0.70:
                 if pred_sign == current_candidate:
                     hold_count += 1
@@ -166,10 +190,11 @@ def main():
 
                 # Confirmed after holding stable
                 if hold_count >= REQUIRED_STABLE_FRAMES:
-                    # Speak if it's a new sign OR if held continuously for > 2.5s
                     if pred_sign != last_spoken_sign or (time.time() - spoken_flash_timer) > 2.5:
                         if tts_enabled:
                             speech.speak(pred_sign)
+                        # Auto-append to sentence builder
+                        sentence_builder.add_word(pred_sign)
                         last_spoken_sign = pred_sign
                         spoken_flash_timer = time.time()
             else:
@@ -179,13 +204,12 @@ def main():
             classifier.reset_history()
             current_candidate = None
             hold_count = 0
-            last_spoken_sign = None  # reset so returning to the sign will speak again
+            last_spoken_sign = None
             pred_sign, confidence = "...", 0.0
 
         hold_ratio = min(1.0, hold_count / REQUIRED_STABLE_FRAMES) if (current_candidate and hold_count > 0) else 0.0
-        just_spoken = (time.time() - spoken_flash_timer) < 1.5
 
-        # Draw UI HUD
+        # Draw HUD
         draw_hud(
             frame=frame,
             sign=pred_sign,
@@ -196,10 +220,13 @@ def main():
             tts_enabled=tts_enabled,
             model_name=classifier.model_name,
             hold_ratio=hold_ratio,
-            just_spoken=just_spoken,
+            sentence=sentence_builder.get_sentence(),
+            stt_status=listener.status_msg,
+            stt_text=listener.last_text,
+            is_listening=listener.is_listening,
         )
 
-        cv2.imshow("JARVIS — Sign Language Translator", frame)
+        cv2.imshow("JARVIS — Universal Sign Language Translator", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key in (ord("q"), ord("Q")):
@@ -208,10 +235,25 @@ def main():
             tts_enabled = not tts_enabled
             state = "ON" if tts_enabled else "OFF"
             print(f"[JARVIS] Voice Speech: {state}")
+        elif key in (ord("m"), ord("M")):
+            # Start Speech-to-Text microphone recording (3.5s)
+            print("[JARVIS] Listening to microphone...")
+            listener.listen_async(duration_sec=3.5)
+        elif key == 13:  # ENTER key -> Speak entire sentence
+            sent = sentence_builder.get_sentence()
+            if sent != "...":
+                print(f"[JARVIS] Speaking Full Sentence: '{sent}'")
+                speech.speak(sent, force=True)
+        elif key in (8, 127):  # BACKSPACE key -> Remove last word
+            sentence_builder.remove_last()
+            print("[JARVIS] Removed last word from sentence")
+        elif key in (ord("c"), ord("C")):  # C key -> Clear sentence
+            sentence_builder.clear()
+            listener.clear()
+            print("[JARVIS] Cleared sentence & speech text")
         elif key in (ord("s"), ord("S")):
             if pred_sign != "...":
                 speech.speak(pred_sign, force=True)
-                spoken_flash_timer = time.time()
 
     # Cleanup
     print("\n[JARVIS] Shutting down...")
