@@ -122,7 +122,7 @@ def main():
 
     # Classifier with small temporal window for quick reaction
     classifier = SignClassifier(MODEL_PATH, smooth_window=5, confidence_threshold=0.65)
-    speech = SpeechEngine(rate=175, volume=1.0)
+    speech = SpeechEngine(rate=2, volume=100)
     tts_enabled = True
 
     # ── Real-Time Gesture Hold-to-Speak (Dwell) State ────────────────── #
@@ -166,7 +166,8 @@ def main():
 
                 # Confirmed after holding stable
                 if hold_count >= REQUIRED_STABLE_FRAMES:
-                    if pred_sign != last_spoken_sign:
+                    # Speak if it's a new sign OR if held continuously for > 2.5s
+                    if pred_sign != last_spoken_sign or (time.time() - spoken_flash_timer) > 2.5:
                         if tts_enabled:
                             speech.speak(pred_sign)
                         last_spoken_sign = pred_sign
