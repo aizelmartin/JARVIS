@@ -17,15 +17,24 @@ from typing import Optional
 class SpeechListener:
     """Non-blocking background Speech-to-Text listener."""
 
-    def __init__(self, sample_rate: int = 16000):
-        self.sample_rate = sample_rate
+    def __init__(self, sample_rate: Optional[int] = None):
+        if sample_rate is None:
+            # Use the default sample rate of the input device
+            try:
+                device_info = sd.query_devices(sd.default.device[0], 'input')
+                self.sample_rate = int(device_info['default_samplerate'])
+            except Exception:
+                self.sample_rate = 16000
+        else:
+            self.sample_rate = sample_rate
+
         self.recognizer = sr.Recognizer()
         self.is_listening = False
         self.last_text = ""
         self.status_msg = "Press M to talk"
         self._thread: Optional[threading.Thread] = None
 
-    def listen_async(self, duration_sec: float = 3.5):
+    def listen_async(self, duration_sec: float = 5.0):
         """Starts recording and transcribing in a background daemon thread."""
         if self.is_listening:
             return
@@ -63,7 +72,12 @@ class SpeechListener:
                 self.status_msg = f"Heard: '{text}'"
                 print(f"[SpeechListener] 🎙️ Transcribed: '{text}'")
             except sr.UnknownValueError:
-                self.status_msg = "Could not understand audio"
+                # Check if it was just silence vs actual garbled speech
+                energy = np.sqrt(np.mean(audio_buffer.astype(np.float32)**2))
+                if energy < 50:
+                    self.status_msg = "No speech detected (Mic too quiet)"
+                else:
+                    self.status_msg = "Could not understand audio"
             except sr.RequestError as e:
                 self.status_msg = "Speech service error (check internet)"
         except Exception as ex:

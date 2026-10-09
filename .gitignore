@@ -28,3 +28,9 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 .DS_Store
+
+# Android / Gradle generated files
+**/.gradle/
+**/.kotlin/
+**/build/
+**/local.properties

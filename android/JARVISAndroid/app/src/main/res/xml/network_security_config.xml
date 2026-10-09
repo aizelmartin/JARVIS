@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network Security Configuration for JARVIS Android (local dev / demo).
+
+    The Flask backend runs on plain HTTP (not HTTPS).
+    Android 9+ blocks cleartext HTTP by default; this config re-enables it
+    for all hosts so the app can reach the backend on any local IP address
+    (e.g. 192.168.1.11:5000).
+
+    This is intentional for a local-network development / faculty-demo app.
+    Do NOT ship to the Play Store without replacing this with a specific
+    domain-config targeting only your LAN IP / hostname.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
