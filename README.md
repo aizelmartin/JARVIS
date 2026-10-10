@@ -1,85 +1,89 @@
-# JARVIS – Universal Sign Language Translator 🦻🤖
+# J.A.R.V.I.S. – Joint AI Recognition and Voice Interpretation System 🦻🤖
 
-**JARVIS** is an advanced, two-way communication system designed to bridge the gap between deaf/mute individuals and hearing individuals. Built as an academic Machine Learning project, it leverages real-time computer vision, custom classification models, and native Speech-to-Text / Text-to-Speech engines.
+**J.A.R.V.I.S.** is an advanced, two-way communication system designed to bridge the gap between deaf/mute individuals and hearing individuals. Originally an academic Machine Learning project, it has evolved into a complete, professional desktop application offering real-time sign recognition, translation, multilingual speech output, and an integrated sign training workspace.
 
 ---
 
 ## 🌟 Key Features
 
 ### 1. Sign Language to Speech (For the Deaf/Mute User)
-* **Real-Time Hand Tracking:** Uses MediaPipe to track 126 skeletal landmarks across both hands simultaneously at 30+ FPS.
-* **Custom Machine Learning Model:** A highly optimized Random Forest Classifier trained exclusively on custom signs collected in the deployment environment, achieving **99.27% accuracy**.
-* **Smart Sentence Builder:** Instead of just flashing words, JARVIS uses a "Hold-to-Confirm" dwell stabilization to construct full sentences dynamically without any word limits.
-* **Native Text-to-Speech (TTS):** Uses asynchronous Windows SAPI (SpVoice) to speak the constructed sentences out loud in real time.
+* **Real-Time Hand Tracking:** Uses MediaPipe to track skeletal landmarks across hands via live camera feed.
+* **Custom Machine Learning Model:** Highly optimized classification trained on custom signs for high accuracy.
+* **Smart Sentence Builder:** Uses "Hold-to-Confirm" temporal stabilization to construct full sentences dynamically without rigid word limits.
+* **Multilingual Translation & Speech:** Automatically translates the constructed sentence and speaks it aloud in supported languages using `gTTS` and `pygame`.
 
 ### 2. Speech to Text (For the Hearing Person)
-* **Microphone STT:** Hearing individuals can press a button to speak into the microphone. JARVIS transcribes their speech and displays it on the HUD in real-time so the deaf user can read it.
+* **Multilingual Microphone STT:** Hearing individuals can press a button to speak in multiple supported languages. JARVIS transcribes their speech, displays it in real-time, and can instantly provide an English translation for the deaf user.
 
-### 3. High-Tech Glassmorphism HUD
-* Features a sleek, non-intrusive Heads-Up Display (HUD) showing ML model confidence, system telemetry, current sentence, and real-time STT banners.
+### 3. Integrated Sign Training Workspace
+* **Dynamic Learning:** A full-window training mode built directly into the UI.
+* **Live Collection:** Record new hand-landmark samples easily with live visual feedback.
+* **Safe Hot-Reloading:** Automatically trains the machine learning model in the background and hot-reloads it without restarting the app, preserving a safe backup of the previous model.
+
+### 4. Cross-Platform Availability
+* Includes source code for the **Android App** and **Web Interface** variants.
 
 ---
 
 ## 🛠️ Technology Stack
 * **Language:** Python 3.x
-* **Computer Vision:** OpenCV (cv2), MediaPipe (Hand Tracking)
-* **Machine Learning:** Scikit-Learn (Random Forest, SVM, KNN), Pandas, NumPy
-* **Speech Integration:** `pyttsx3` / `win32com` (TTS), `SpeechRecognition`, `sounddevice` (STT)
+* **UI Framework:** CustomTkinter (Professional Dark Theme)
+* **Computer Vision:** OpenCV (`cv2`), MediaPipe (Hand Tracking)
+* **Machine Learning:** Scikit-Learn (SVM/Random Forest), Pandas, NumPy
+* **Speech & Translation:** `googletrans`, `gTTS`, `SpeechRecognition`, `sounddevice`, `pygame`
 
 ---
 
-## 📊 Model Architecture & Performance
-During Phase 4 benchmarking, 5 different algorithms were evaluated using 5-Fold Cross Validation on 3,400 samples across 17 distinct custom signs.
+## 🚀 Setup & Installation (Windows)
 
-| Model | Test Accuracy | Inference Latency |
-|-------|---------------|-------------------|
-| **Random Forest (Winner)** | **99.26%** | **12.87 ms** |
-| SVM (RBF Kernel) | 99.12% | 0.34 ms |
-| KNN (k=5) | 98.82% | 4.80 ms |
-| Logistic Regression | 98.24% | 0.25 ms |
-| Decision Tree | 97.94% | 0.23 ms |
-
-*The model was trained exclusively on the deployment environment background to ensure maximum real-world reliability.*
-
----
-
-## 🚀 How to Run
-
-### Option A: Web Interface (New!)
-The newest version of JARVIS includes a professional, real-time web interface. This mode uses your browser's webcam and offers language translation features.
-1. **Activate the virtual environment:**
+1. **Clone the repository:**
    ```powershell
-   .venv\Scripts\activate
+   git clone https://github.com/aizelmartin/JARVIS.git
+   cd JARVIS
    ```
-2. **Start the Flask server:**
-   ```bash
-   python web_app.py
-   ```
-3. **Open your browser** and navigate to: `http://127.0.0.1:5000`
 
-### Option B: Terminal Interface
-The classic HUD overlay mode:
-1. **Launch JARVIS:**
-   ```bash
-   python main.py
+2. **Create and activate a virtual environment:**
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\activate
    ```
-2. **Controls:**
-   * `ENTER`: Speak the entire constructed sentence aloud
-   * `BACKSPACE`: Delete the last added word
-   * `C`: Clear the current sentence
-   * `M`: Activate Microphone (Speech-to-Text for the hearing person)
-   * `T`: Toggle Auto-Voice ON/OFF
-   * `Q`: Quit
+
+3. **Install dependencies:**
+   ```powershell
+   pip install -r requirements.txt
+   ```
+
+4. **Hardware & Network Requirements:**
+   * **Webcam** (required for sign recognition)
+   * **Microphone & Speakers** (required for speech-to-text and text-to-speech)
+   * **Active Internet Connection** (required for `googletrans`, `gTTS`, and Google STT APIs)
 
 ---
 
-## 📝 Custom Data Collection
-JARVIS includes a built-in Data Collector. To train your own words:
-1. Run `python src/dataset/data_collector.py --signs word1 word2`
-2. Follow on-screen prompts to record 200 samples per word.
-3. Run `python src/dataset/merge_datasets.py`
-4. Run `python src/ml/train_models.py --data "data/processed/landmarks_combined.csv"`
-5. Launch `main.py`!
+## 🎮 How to Run
+
+**Launch the Desktop Application:**
+```powershell
+python main.py
+```
+
+### Supported Languages
+English, Malayalam, Hindi, Tamil, Kannada, and Telugu.
+*(Note: Requires an internet connection for translation and voice synthesis.)*
 
 ---
-*Developed for academic purposes to explore accessible AI integration.*
+
+## 📝 Training New Signs
+
+You can easily add new signs directly through the desktop app:
+1. Turn the Camera **ON**.
+2. Click **➕ Open Training Workspace** on the right panel.
+3. Enter the label for your new sign.
+4. Select a target number of samples (e.g., 200).
+5. Click **▶ Start Collection** and perform the sign, slightly varying distance and angle.
+6. Once completed, click **💾 Save & Train**. The model will re-train in the background and hot-reload automatically.
+
+*(Any large model backups or datasets generated during training are kept locally and ignored by Git to save space.)*
+
+---
+*“Connecting people, beyond words.”*
