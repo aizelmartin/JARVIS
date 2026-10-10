@@ -1,32 +1,16 @@
-"""
-main.py — JARVIS Universal Sign Language Translator
-===================================================
-Complete Two-Way Communication System:
-  1. Sign Language -> Speech:
-     - 640x480 video feed with dual-hand MediaPipe tracking
-     - 126-feature normalized landmark vector
-     - Real-time ML classifier with confidence thresholding
-     - Hold-to-Confirm dwell stabilization (0.3s)
-     - Sentence Builder: Accumulates signs into full phrases
-     - Native Windows SAPI asynchronous Text-to-Speech (TTS)
-  2. Speech -> Text:
-     - Microphone listening via sounddevice + SpeechRecognition
-     - Displays hearing person's spoken words on screen for deaf/mute user
-
-Keyboard Controls:
-  Q         — Quit
-  T         — Toggle Voice (TTS) ON / OFF
-  ENTER     — Speak the entire constructed sentence aloud
-  BACKSPACE — Delete the last added word from sentence
-  C         — Clear the constructed sentence
-  M         — Listen to microphone (Speech-to-Text for 3.5s)
-  S         — Force speak current sign immediately
-"""
-
 import cv2
 import sys
 import os
 import time
+import threading
+from typing import Optional
+
+import numpy as np
+from PIL import Image, ImageTk
+import customtkinter as ctk
+
+# Translation & Speech
+from googletrans import Translator
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -39,232 +23,371 @@ from src.speech.speech_listener import SpeechListener
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "saved_models", "sign_classifier.pkl")
 
+# UI Settings
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
-def draw_hud(
-    frame,
-    sign: str,
-    conf: float,
-    n_hands: int,
-    hands_lbl: list,
-    fps: float,
-    tts_enabled: bool,
-    model_name: str,
-    hold_ratio: float,
-    sentence: str,
-    stt_status: str,
-    stt_text: str,
-    is_listening: bool,
-):
-    """Renders a sleek, comprehensive two-way communication HUD with Glassmorphism."""
-    h, w = frame.shape[:2]
-    overlay = frame.copy()
+class JarvisDesktopApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
 
-    # ── Top Bar: Telemetry & Status ──────────────────────────────────── #
-    cv2.rectangle(overlay, (0, 0), (w, 38), (10, 10, 15), -1)
-    
-    # ── Middle-Top: Speech-to-Text (Hearing Person Response) ─────────── #
-    stt_banner_h = 34
-    stt_y = 42
-    stt_bg = (60, 20, 30) if is_listening else (20, 20, 25)
-    cv2.rectangle(overlay, (0, stt_y), (w, stt_y + stt_banner_h), stt_bg, -1)
+        self.title("J.A.R.V.I.S. — Universal Sign Language Translator")
+        self.geometry("1200x800")
+        self.minsize(1000, 700)
 
-    # ── Bottom Section: Sign Translation & Sentence Construction ─────── #
-    card_h = 135
-    cv2.rectangle(overlay, (0, h - card_h), (w, h), (15, 15, 20), -1)
+        # State Variables
+        self.tts_enabled = ctk.BooleanVar(value=True)
+        self.is_fullscreen = False
+        
+        self.sentence = ""
+        self.translated_text = ""
+        self.current_sign = "..."
+        self.current_conf = 0.0
+        self.target_lang = ctk.StringVar(value="Malayalam")
+        
+        self.lang_map = {
+            "Malayalam": "ml",
+            "Hindi": "hi",
+            "Tamil": "ta",
+            "Kannada": "kn",
+            "Telugu": "te"
+        }
 
-    # Blend overlay with original frame (Alpha = 0.85 for glass effect)
-    cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+        # Pipeline instances
+        self.cam = None
+        self.detector = None
+        self.classifier = None
+        self.sentence_builder = None
+        self.speech = None
+        self.listener = None
+        self.translator = Translator()
 
-    # ── Draw Text on original frame (so text stays sharp) ────────────── #
-    # Top Bar Borders & Text
-    cv2.line(frame, (0, 38), (w, 38), (100, 100, 100), 1)
-    cv2.putText(frame, "JARVIS", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.70, (0, 255, 150), 2, cv2.LINE_AA)
-    cv2.putText(frame, f"| FPS: {fps:.1f}", (105, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"| ML: {model_name}", (195, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 220, 255), 1, cv2.LINE_AA)
+        self.running = True
+        
+        self.REQUIRED_STABLE_FRAMES = 9
+        self.current_candidate = None
+        self.hold_count = 0
+        self.last_spoken_sign = None
+        self.spoken_flash_timer = 0.0
 
-    mode_text = f"{n_hands} HAND(S)" if n_hands > 0 else "IDLE"
-    mode_color = (0, 255, 120) if n_hands == 2 else ((0, 200, 255) if n_hands == 1 else (150, 150, 150))
-    cv2.putText(frame, mode_text, (w - 120, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.50, mode_color, 2, cv2.LINE_AA)
+        self.setup_ui()
+        self.bind_shortcuts()
+        self.init_pipeline()
 
-    # STT Text
-    cv2.line(frame, (0, stt_y + stt_banner_h), (w, stt_y + stt_banner_h), (80, 80, 80), 1)
-    mic_icon = "MIC: [RECORDING...]" if is_listening else "MIC: [IDLE - Press M]"
-    mic_color = (0, 140, 255) if is_listening else (140, 140, 140)
-    cv2.putText(frame, mic_icon, (12, stt_y + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.45, mic_color, 1, cv2.LINE_AA)
+    def setup_ui(self):
+        # Header
+        self.header_frame = ctk.CTkFrame(self, height=60, corner_radius=0)
+        self.header_frame.pack(side="top", fill="x")
+        
+        self.title_label = ctk.CTkLabel(self.header_frame, text="J.A.R.V.I.S.", font=ctk.CTkFont(size=24, weight="bold"))
+        self.title_label.pack(side="left", padx=20, pady=10)
+        
+        self.subtitle_label = ctk.CTkLabel(self.header_frame, text="AI-Powered Sign Language Translator", font=ctk.CTkFont(size=14))
+        self.subtitle_label.pack(side="left", padx=10, pady=10)
+        
+        self.status_label = ctk.CTkLabel(self.header_frame, text="Initializing...", text_color="orange")
+        self.status_label.pack(side="right", padx=20, pady=10)
+        
+        self.fs_btn = ctk.CTkButton(self.header_frame, text="Fullscreen (F11)", width=120, command=self.toggle_fullscreen)
+        self.fs_btn.pack(side="right", padx=10, pady=10)
 
-    display_stt = f"Heard: \"{stt_text}\"" if stt_text else stt_status
-    stt_text_color = (0, 255, 255) if stt_text else (180, 180, 180)
-    cv2.putText(frame, display_stt, (190, stt_y + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.48, stt_text_color, 1, cv2.LINE_AA)
+        # Main Workspace
+        self.main_paned = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_paned.pack(side="top", fill="both", expand=True, padx=20, pady=10)
+        
+        self.main_paned.columnconfigure(0, weight=6)
+        self.main_paned.columnconfigure(1, weight=4)
+        self.main_paned.rowconfigure(0, weight=1)
 
-    # Bottom Section Text
-    cv2.line(frame, (0, h - card_h), (w, h - card_h), (80, 80, 80), 1)
-    has_sign = (sign != "..." and conf >= 0.60)
-    display_sign = sign.upper() if has_sign else "..."
-    sign_color = (0, 255, 150) if has_sign else (150, 150, 150)
+        # Left Column: Camera
+        self.camera_frame = ctk.CTkFrame(self.main_paned)
+        self.camera_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        
+        self.video_label = ctk.CTkLabel(self.camera_frame, text="")
+        self.video_label.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        self.hud_frame = ctk.CTkFrame(self.camera_frame, height=50)
+        self.hud_frame.pack(fill="x", padx=10, pady=10)
+        
+        self.sign_display = ctk.CTkLabel(self.hud_frame, text="Sign: ...", font=ctk.CTkFont(size=20, weight="bold"))
+        self.sign_display.pack(side="left", padx=20, pady=10)
+        
+        self.conf_progress = ctk.CTkProgressBar(self.hud_frame, width=150)
+        self.conf_progress.set(0)
+        self.conf_progress.pack(side="left", padx=20, pady=10)
+        
+        # Right Column: Text & Controls
+        self.right_frame = ctk.CTkFrame(self.main_paned)
+        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
 
-    cv2.putText(frame, "SIGN:", (14, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
-    cv2.putText(frame, display_sign, (70, h - 102), cv2.FONT_HERSHEY_SIMPLEX, 0.90, sign_color, 2, cv2.LINE_AA)
+        # Sentence section
+        ctk.CTkLabel(self.right_frame, text="Constructed Sentence", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 5))
+        self.sentence_textbox = ctk.CTkTextbox(self.right_frame, height=100, font=ctk.CTkFont(size=18))
+        self.sentence_textbox.pack(fill="x", padx=10, pady=5)
+        self.sentence_textbox.configure(state="disabled")
 
-    if has_sign:
-        bar_x, bar_y = 250, h - 116
-        bar_w = int(120 * conf)
-        cv2.putText(frame, f"CONF: {conf*100:.0f}%", (bar_x, bar_y + 11), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 200), 1, cv2.LINE_AA)
-        cv2.rectangle(frame, (bar_x + 85, bar_y), (bar_x + 205, bar_y + 12), (60, 60, 60), -1)
-        cv2.rectangle(frame, (bar_x + 85, bar_y), (bar_x + 85 + bar_w, bar_y + 12), (0, 255, 150), -1)
+        # Translation section
+        lang_frame = ctk.CTkFrame(self.right_frame, fg_color="transparent")
+        lang_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(lang_frame, text="Translation Language:").pack(side="left")
+        self.lang_option = ctk.CTkOptionMenu(lang_frame, variable=self.target_lang, values=list(self.lang_map.keys()))
+        self.lang_option.pack(side="left", padx=10)
+        
+        self.translate_btn = ctk.CTkButton(lang_frame, text="Translate", width=100, command=self.do_translation)
+        self.translate_btn.pack(side="right")
 
-        hold_w = int(120 * hold_ratio)
-        hold_color = (0, 200, 255) if hold_ratio < 1.0 else (0, 255, 150)
-        cv2.putText(frame, "HOLD:", (bar_x, bar_y + 27), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 200), 1, cv2.LINE_AA)
-        cv2.rectangle(frame, (bar_x + 85, bar_y + 16), (bar_x + 205, bar_y + 28), (60, 60, 60), -1)
-        cv2.rectangle(frame, (bar_x + 85, bar_y + 16), (bar_x + 85 + hold_w, bar_y + 28), hold_color, -1)
+        self.translation_textbox = ctk.CTkTextbox(self.right_frame, height=100, font=ctk.CTkFont(size=18))
+        self.translation_textbox.pack(fill="x", padx=10, pady=5)
+        
+        # STT Section
+        stt_frame = ctk.CTkFrame(self.right_frame)
+        stt_frame.pack(fill="x", padx=10, pady=10)
+        self.stt_label = ctk.CTkLabel(stt_frame, text="Mic: Idle", font=ctk.CTkFont(size=14))
+        self.stt_label.pack(side="left", padx=10, pady=10)
+        self.stt_btn = ctk.CTkButton(stt_frame, text="🎙 Listen (M)", width=100, command=self.listen_mic)
+        self.stt_btn.pack(side="right", padx=10, pady=10)
 
-    tts_text = "VOICE: [ON]" if tts_enabled else "VOICE: [OFF]"
-    tts_color = (0, 255, 150) if tts_enabled else (150, 150, 150)
-    cv2.putText(frame, tts_text, (w - 130, h - 105), cv2.FONT_HERSHEY_SIMPLEX, 0.48, tts_color, 1, cv2.LINE_AA)
+        # Controls Section
+        ctrl_frame = ctk.CTkFrame(self.right_frame)
+        ctrl_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Grid of controls
+        ctrl_frame.columnconfigure((0,1), weight=1)
+        
+        self.btn_speak_sign = ctk.CTkButton(ctrl_frame, text="Speak Current Sign (S)", command=self.speak_current_sign)
+        self.btn_speak_sign.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        
+        self.btn_speak_sent = ctk.CTkButton(ctrl_frame, text="Speak Sentence (Enter)", command=self.speak_sentence)
+        self.btn_speak_sent.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        
+        self.btn_del_word = ctk.CTkButton(ctrl_frame, text="Delete Last Word (Back)", command=self.delete_word)
+        self.btn_del_word.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        
+        self.btn_clear = ctk.CTkButton(ctrl_frame, text="Clear All (C)", command=self.clear_all)
+        self.btn_clear.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        
+        self.btn_speak_trans = ctk.CTkButton(ctrl_frame, text="Speak Translation", command=self.speak_translation)
+        self.btn_speak_trans.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
+        
+        self.toggle_tts = ctk.CTkSwitch(ctrl_frame, text="Auto-Speak", variable=self.tts_enabled)
+        self.toggle_tts.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
 
-    # Sentence Box
-    cv2.line(frame, (10, h - 78), (w - 10, h - 78), (80, 80, 80), 1)
-    cv2.putText(frame, "SENTENCE:", (14, h - 52), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1, cv2.LINE_AA)
-    sent_display = sentence if sentence != "..." else "Add words by signing..."
-    sent_color = (255, 255, 255) if sentence != "..." else (150, 150, 150)
-    cv2.putText(frame, sent_display, (110, h - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, sent_color, 2, cv2.LINE_AA)
+    def bind_shortcuts(self):
+        self.bind("<Return>", lambda e: self.speak_sentence() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<BackSpace>", lambda e: self.delete_word() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<c>", lambda e: self.clear_all() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<C>", lambda e: self.clear_all() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<m>", lambda e: self.listen_mic() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<M>", lambda e: self.listen_mic() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<s>", lambda e: self.speak_current_sign() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<S>", lambda e: self.speak_current_sign() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<t>", lambda e: self.toggle_tts.toggle() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<T>", lambda e: self.toggle_tts.toggle() if str(self.focus_get()) != str(self.translation_textbox) else None)
+        self.bind("<F11>", lambda e: self.toggle_fullscreen())
+        self.bind("<Escape>", lambda e: self.exit_fullscreen())
 
-    # Footer
-    footer = "ENTER=Speak Sentence   BACK=Delete Word   C=Clear   M=Mic STT   T=Voice   Q=Quit"
-    cv2.putText(frame, footer, (14, h - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (180, 180, 180), 1, cv2.LINE_AA)
+    def toggle_fullscreen(self, event=None):
+        self.is_fullscreen = not self.is_fullscreen
+        self.attributes("-fullscreen", self.is_fullscreen)
 
+    def exit_fullscreen(self, event=None):
+        if self.is_fullscreen:
+            self.is_fullscreen = False
+            self.attributes("-fullscreen", False)
 
-def main():
-    print("[JARVIS] Initializing camera, hand tracking, and speech...")
-    cam = CameraStream(camera_index=0, width=640, height=480)
-    detector = HandDetector(max_hands=2, min_detection_conf=0.7)
+    def init_pipeline(self):
+        self.status_label.configure(text="Starting camera...", text_color="orange")
+        self.cam = CameraStream(camera_index=0, width=640, height=480)
+        self.detector = HandDetector(max_hands=2, min_detection_conf=0.7)
+        
+        if not self.cam.start():
+            self.status_label.configure(text="Camera Error!", text_color="red")
+            return
 
-    if not cam.start():
-        print("[JARVIS] Could not start camera. Exiting.")
-        sys.exit(1)
+        if not os.path.exists(MODEL_PATH):
+            self.status_label.configure(text="Model Missing!", text_color="red")
+            return
 
-    if not os.path.exists(MODEL_PATH):
-        print(f"[JARVIS] Model not found at {MODEL_PATH}")
-        print("[JARVIS] Please run python src/ml/train_models.py first.")
-        cam.release()
-        sys.exit(1)
+        self.classifier = SignClassifier(MODEL_PATH, smooth_window=5, confidence_threshold=0.65)
+        self.speech = SpeechEngine(rate=2, volume=100)
+        self.listener = SpeechListener()
+        self.sentence_builder = SentenceBuilder(max_words=100)
+        
+        self.status_label.configure(text="Connected", text_color="green")
+        
+        # Start processing loop
+        self.process_thread = threading.Thread(target=self.camera_worker, daemon=True)
+        self.process_thread.start()
+        
+        self.update_ui_loop()
 
-    classifier = SignClassifier(MODEL_PATH, smooth_window=5, confidence_threshold=0.65)
-    speech = SpeechEngine(rate=2, volume=100)
-    listener = SpeechListener()
-    sentence_builder = SentenceBuilder(max_words=100)
+    def camera_worker(self):
+        while self.running:
+            frame = self.cam.read_frame()
+            if frame is None:
+                time.sleep(0.01)
+                continue
 
-    tts_enabled = True
-    REQUIRED_STABLE_FRAMES = 9
-    current_candidate = None
-    hold_count = 0
-    last_spoken_sign = None
-    spoken_flash_timer = 0.0
+            # Copy frame for OpenCV drawing
+            display_frame = frame.copy()
+            
+            self.detector.process_frame(display_frame)
+            self.detector.draw_landmarks(display_frame)
+            
+            n_hands = self.detector.num_hands_detected()
+            features_126 = self.detector.extract_features_both()
+            
+            pred_sign = "..."
+            confidence = 0.0
 
-    print("[JARVIS] Two-Way Translator is online!")
-    print("         Sign to form sentences. Press M to listen to speech.")
-
-    while True:
-        frame = cam.read_frame()
-        if frame is None:
-            break
-
-        fps = cam.compute_fps()
-
-        # Hand detection & landmarks
-        detector.process_frame(frame)
-        detector.draw_landmarks(frame)
-
-        n_hands = detector.num_hands_detected()
-        hands_lbl = detector.get_handedness_list()
-        features_126 = detector.extract_features_both()
-
-        # ML Prediction with temporal smoothing
-        if n_hands > 0:
-            pred_sign, confidence = classifier.predict_smooth(features_126)
-
-            if pred_sign != "..." and confidence >= 0.70:
-                if pred_sign == current_candidate:
-                    hold_count += 1
+            if n_hands > 0:
+                pred_sign, confidence = self.classifier.predict_smooth(features_126)
+                
+                if pred_sign != "..." and confidence >= 0.70:
+                    if pred_sign == self.current_candidate:
+                        self.hold_count += 1
+                    else:
+                        self.current_candidate = pred_sign
+                        self.hold_count = 1
+                        
+                    if self.hold_count >= self.REQUIRED_STABLE_FRAMES:
+                        if pred_sign != self.last_spoken_sign or (time.time() - self.spoken_flash_timer) > 2.5:
+                            if self.tts_enabled.get():
+                                self.speech.speak(pred_sign)
+                            self.sentence_builder.add_word(pred_sign)
+                            self.last_spoken_sign = pred_sign
+                            self.spoken_flash_timer = time.time()
                 else:
-                    current_candidate = pred_sign
-                    hold_count = 1
-
-                # Confirmed after holding stable
-                if hold_count >= REQUIRED_STABLE_FRAMES:
-                    if pred_sign != last_spoken_sign or (time.time() - spoken_flash_timer) > 2.5:
-                        if tts_enabled:
-                            speech.speak(pred_sign)
-                        # Auto-append to sentence builder
-                        sentence_builder.add_word(pred_sign)
-                        last_spoken_sign = pred_sign
-                        spoken_flash_timer = time.time()
+                    self.current_candidate = None
+                    self.hold_count = 0
             else:
-                current_candidate = None
-                hold_count = 0
+                self.classifier.reset_history()
+                self.current_candidate = None
+                self.hold_count = 0
+                self.last_spoken_sign = None
+
+            self.current_sign = pred_sign
+            self.current_conf = confidence
+            
+            # Convert BGR to RGB for Tkinter
+            cv2_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+            self.latest_image = Image.fromarray(cv2_rgb)
+
+    def update_ui_loop(self):
+        if not self.running:
+            return
+            
+        # Update Camera Feed
+        if hasattr(self, 'latest_image') and self.latest_image:
+            # Resize proportionally to fit the label
+            label_w = self.video_label.winfo_width()
+            label_h = self.video_label.winfo_height()
+            
+            if label_w > 10 and label_h > 10:
+                img_w, img_h = self.latest_image.size
+                ratio = min(label_w/img_w, label_h/img_h)
+                new_w = int(img_w * ratio)
+                new_h = int(img_h * ratio)
+                
+                resized = self.latest_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                photo = ctk.CTkImage(light_image=resized, dark_image=resized, size=(new_w, new_h))
+                
+                self.video_label.configure(image=photo)
+                self.video_label.image = photo
+
+        # Update HUD
+        if self.current_sign != "...":
+            self.sign_display.configure(text=f"Sign: {self.current_sign.upper()}", text_color="#00FF96")
         else:
-            classifier.reset_history()
-            current_candidate = None
-            hold_count = 0
-            last_spoken_sign = None
-            pred_sign, confidence = "...", 0.0
+            self.sign_display.configure(text="Sign: ...", text_color="gray")
+            
+        self.conf_progress.set(self.current_conf)
 
-        hold_ratio = min(1.0, hold_count / REQUIRED_STABLE_FRAMES) if (current_candidate and hold_count > 0) else 0.0
+        # Update Sentence
+        current_sentence = self.sentence_builder.get_sentence()
+        if current_sentence == "...":
+            current_sentence = ""
+            
+        if self.sentence != current_sentence:
+            self.sentence = current_sentence
+            self.sentence_textbox.configure(state="normal")
+            self.sentence_textbox.delete("0.0", "end")
+            self.sentence_textbox.insert("0.0", self.sentence)
+            self.sentence_textbox.configure(state="disabled")
 
-        # Draw HUD
-        draw_hud(
-            frame=frame,
-            sign=pred_sign,
-            conf=confidence,
-            n_hands=n_hands,
-            hands_lbl=hands_lbl,
-            fps=fps,
-            tts_enabled=tts_enabled,
-            model_name=classifier.model_name,
-            hold_ratio=hold_ratio,
-            sentence=sentence_builder.get_sentence(),
-            stt_status=listener.status_msg,
-            stt_text=listener.last_text,
-            is_listening=listener.is_listening,
-        )
+        # Update Mic Status
+        if self.listener:
+            self.stt_label.configure(text=self.listener.status_msg)
+            if not self.listener.is_listening and self.listener.last_text:
+                pass # The STT text can be appended or just shown. 
+                # For this design, let's keep it simple: STT status shows what was heard.
+        
+        self.after(30, self.update_ui_loop)
 
-        cv2.imshow("JARVIS — Universal Sign Language Translator", frame)
+    def speak_current_sign(self):
+        if self.current_sign != "...":
+            self.speech.speak(self.current_sign, force=True)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key in (ord("q"), ord("Q")):
-            break
-        elif key in (ord("t"), ord("T")):
-            tts_enabled = not tts_enabled
-            state = "ON" if tts_enabled else "OFF"
-            print(f"[JARVIS] Voice Speech: {state}")
-        elif key in (ord("m"), ord("M")):
-            # Start Speech-to-Text microphone recording (5.0s)
-            print("[JARVIS] Listening to microphone...")
-            listener.listen_async(duration_sec=5.0)
-        elif key == 13:  # ENTER key -> Speak entire sentence
-            sent = sentence_builder.get_sentence()
-            if sent != "...":
-                print(f"[JARVIS] Speaking Full Sentence: '{sent}'")
-                speech.speak(sent, force=True)
-        elif key in (8, 127):  # BACKSPACE key -> Remove last word
-            sentence_builder.remove_last()
-            print("[JARVIS] Removed last word from sentence")
-        elif key in (ord("c"), ord("C")):  # C key -> Clear sentence
-            sentence_builder.clear()
-            listener.clear()
-            print("[JARVIS] Cleared sentence & speech text")
-        elif key in (ord("s"), ord("S")):
-            if pred_sign != "...":
-                speech.speak(pred_sign, force=True)
+    def speak_sentence(self):
+        sent = self.sentence_builder.get_sentence()
+        if sent != "...":
+            self.speech.speak(sent, force=True)
 
-    # Cleanup
-    print("\n[JARVIS] Shutting down...")
-    speech.stop()
-    detector.close()
-    cam.release()
-    cv2.destroyAllWindows()
-    print("[JARVIS] Goodbye.")
+    def delete_word(self):
+        self.sentence_builder.remove_last()
+
+    def clear_all(self):
+        self.sentence_builder.clear()
+        if self.listener:
+            self.listener.clear()
+        self.translation_textbox.delete("0.0", "end")
+
+    def listen_mic(self):
+        if self.listener and not self.listener.is_listening:
+            self.listener.listen_async(duration_sec=4.0)
+
+    def do_translation(self):
+        sent = self.sentence_builder.get_sentence()
+        if not sent or sent == "...":
+            self.translation_textbox.delete("0.0", "end")
+            self.translation_textbox.insert("0.0", "[No sentence to translate]")
+            return
+            
+        lang = self.lang_map.get(self.target_lang.get(), "en")
+        self.translation_textbox.delete("0.0", "end")
+        self.translation_textbox.insert("0.0", "Translating...")
+        
+        def translate_worker():
+            try:
+                res = self.translator.translate(sent, dest=lang)
+                self.after(0, lambda: self._update_translation(res.text))
+            except Exception as e:
+                self.after(0, lambda: self._update_translation(f"[Translation Error: {e}]"))
+                
+        threading.Thread(target=translate_worker, daemon=True).start()
+
+    def _update_translation(self, text):
+        self.translation_textbox.delete("0.0", "end")
+        self.translation_textbox.insert("0.0", text)
+
+    def speak_translation(self):
+        text = self.translation_textbox.get("0.0", "end").strip()
+        if text and not text.startswith("["):
+            # SAPI might struggle with non-English, but we can pass it
+            self.speech.speak(text, force=True)
+
+    def on_closing(self):
+        self.running = False
+        if self.cam:
+            self.cam.release()
+        if self.detector:
+            self.detector.close()
+        if self.speech:
+            self.speech.stop()
+        self.destroy()
 
 
 if __name__ == "__main__":
-    main()
+    app = JarvisDesktopApp()
+    app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    app.mainloop()
